@@ -73,11 +73,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
         text-align: center;
         color: white;
       }
+      #vrBtn {
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <section id="stats">
       <ul>
+        <li>View in VR: <img src="media/vr_goggles_sm.png" id="vrBtn"/></li>
         <li>Hardware Unit ID: <span id="hardwareUnitId">--</span></li>
         <li>Device ID: <span id="deviceId">--</span></li>
         <li>Device Name: <span id="deviceName">--</span></li>
@@ -124,7 +128,45 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       //
       var sensorDevice = null;
       var hmdDevice = null;
+      var vrMode = false;
       var stats = document.getElementById("stats");
+
+      function PerspectiveMatrixFromVRFieldOfView(fov, zNear, zFar) {
+        var outMat = new THREE.Matrix4();
+        var out = outMat.elements;
+        var upTan = Math.tan(fov.upDegrees * Math.PI/180.0);
+        var downTan = Math.tan(fov.downDegrees * Math.PI/180.0);
+        var leftTan = Math.tan(fov.leftDegrees * Math.PI/180.0);
+        var rightTan = Math.tan(fov.rightDegrees * Math.PI/180.0);
+
+        var xScale = 2.0 / (leftTan + rightTan);
+        var yScale = 2.0 / (upTan + downTan);
+
+        out[0] = xScale;
+        out[4] = 0.0;
+        out[8] = -((leftTan - rightTan) * xScale * 0.5);
+        out[12] = 0.0;
+
+        out[1] = 0.0;
+        out[5] = yScale;
+        out[9] = ((upTan - downTan) * yScale * 0.5);
+        out[13] = 0.0;
+
+        out[2] = 0.0;
+        out[6] = 0.0;
+        out[10] = zFar / (zNear - zFar);
+        out[14] = (zFar * zNear) / (zNear - zFar);
+
+        out[3] = 0.0;
+        out[7] = 0.0;
+        out[11] = -1.0;
+        out[15] = 0.0;
+
+        return outMat;
+      }
+
+      var cameraLeft = new THREE.PerspectiveCamera( 75, 4/3, 0.1, 1000 );
+      var cameraRight = new THREE.PerspectiveCamera( 75, 4/3, 0.1, 1000 );
 
       function EnumerateVRDevices(devices) {
         // First find an HMD device
@@ -132,10 +174,27 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
           if (devices[i] instanceof HMDVRDevice) {
             hmdDevice = devices[i];
 
-            document.getElementById("resolution").innerHTML = hmdDevice.displaySize.width + "x" + hmdDevice.displaySize.height;
-            document.getElementById("renderTarget").innerHTML = hmdDevice.renderTargetSize.width + "x" + hmdDevice.renderTargetSize.height;
-            document.getElementById("leftTranslation").innerHTML = printVector(hmdDevice.getEyeTranslation("left"));
-            document.getElementById("rightTranslation").innerHTML = printVector(hmdDevice.getEyeTranslation("right"));
+            if ('displaySize' in hmdDevice) {
+              document.getElementById("resolution").innerHTML = hmdDevice.displaySize.width + "x" + hmdDevice.displaySize.height;
+            }
+            if ('renderTargetSize' in hmdDevice) {
+              document.getElementById("renderTarget").innerHTML = hmdDevice.renderTargetSize.width + "x" + hmdDevice.renderTargetSize.height;
+            }
+
+            var eyeOffsetLeft = hmdDevice.getEyeTranslation("left");
+            var eyeOffsetRight = hmdDevice.getEyeTranslation("right")
+            document.getElementById("leftTranslation").innerHTML = printVector(eyeOffsetLeft);
+            document.getElementById("rightTranslation").innerHTML = printVector(eyeOffsetRight);
+
+            var fovLeft = hmdDevice.getRecommendedEyeFieldOfView("left");
+            cameraLeft.position.sub(eyeOffsetLeft);
+            cameraLeft.projectionMatrix = PerspectiveMatrixFromVRFieldOfView(fovLeft, 0.1, 1000);
+            cameraLeft.position.z = 12;
+
+            var fovRight = hmdDevice.getRecommendedEyeFieldOfView("right");
+            cameraRight.position.sub(eyeOffsetRight);
+            cameraRight.projectionMatrix = PerspectiveMatrixFromVRFieldOfView(fovRight, 0.1, 1000);
+            cameraRight.position.z = 12;
           }
         }
 
@@ -223,6 +282,28 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       resize();
       window.addEventListener("resize", resize, false);
 
+      // Fullscreen VR mode handling
+
+      function onFullscreenChange() {
+        if(!document.webkitFullscreenElement && !document.mozFullScreenElement) {
+          vrMode = false;
+        }
+        resize();
+      }
+
+      document.addEventListener("webkitfullscreenchange", onFullscreenChange, false);
+      document.addEventListener("mozfullscreenchange", onFullscreenChange, false);
+
+      var vrBtn = document.getElementById("vrBtn");
+      vrBtn.addEventListener("click", function() {
+        vrMode = true;
+        if (renderer.domElement.webkitRequestFullscreen) {
+          renderer.domElement.webkitRequestFullscreen({ vrDisplay: hmdDevice, vrDistortion: false });
+        } else if (renderer.domElement.mozRequestFullScreen) {
+          renderer.domElement.mozRequestFullScreen({ vrDisplay: hmdDevice });
+        }
+      }, false);
+
       //
       // Update Loop
       //
@@ -264,13 +345,29 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       function render(t) {
         requestAnimationFrame(render);
 
-        if (!updateVRDevice()) {
+        if (!updateVRDevice() && rift) {
           // If we don't have a VR device just spin the model around to give us
           // something pretty to look at.
           rift.rotation.y += 0.01;
         }
 
-        renderer.render(scene, camera);
+        if (vrMode) {
+          // Render left eye
+          renderer.enableScissorTest ( true );
+          renderer.setScissor( 0, 0, window.innerWidth / 2, window.innerHeight );
+          renderer.setViewport( 0, 0, window.innerWidth / 2, window.innerHeight );
+          renderer.render(scene, cameraLeft);
+
+          // Render right eye
+          renderer.setScissor( window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight );
+          renderer.setViewport( window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight );
+          renderer.render(scene, cameraRight);
+        } else {
+          // Render mono view
+          renderer.enableScissorTest ( false );
+          renderer.setViewport( 0, 0, window.innerWidth, window.innerHeight );
+          renderer.render(scene, camera);
+        }
       }
       document.body.appendChild( renderer.domElement );
       render();

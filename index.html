@@ -295,14 +295,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
       document.addEventListener("mozfullscreenchange", onFullscreenChange, false);
 
       var vrBtn = document.getElementById("vrBtn");
-      vrBtn.addEventListener("click", function() {
-        vrMode = true;
-        if (renderer.domElement.webkitRequestFullscreen) {
-          renderer.domElement.webkitRequestFullscreen({ vrDisplay: hmdDevice, vrDistortion: false });
-        } else if (renderer.domElement.mozRequestFullScreen) {
-          renderer.domElement.mozRequestFullScreen({ vrDisplay: hmdDevice });
-        }
-      }, false);
+      if (vrBtn) {
+        vrBtn.addEventListener("click", function() {
+          vrMode = true;
+          if (renderer.domElement.webkitRequestFullscreen) {
+            renderer.domElement.webkitRequestFullscreen({ vrDisplay: hmdDevice, vrDistortion: false });
+          } else if (renderer.domElement.mozRequestFullScreen) {
+            renderer.domElement.mozRequestFullScreen({ vrDisplay: hmdDevice });
+          }
+        }, false);
+      }
 
       //
       // Update Loop
